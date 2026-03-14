@@ -293,13 +293,7 @@ function _tryConnect() {
   });
 
   state.mqttClient.on('offline', () => setConnBadge('error'));
-}
-
   state.mqttClient.on('reconnect', () => setConnBadge('connecting'));
-  state.mqttClient.on('offline',   () => {
-    console.warn('[MQTT] Client went offline');
-    setConnBadge('error');
-  });
 }
 
 function setConnBadge(status) {
