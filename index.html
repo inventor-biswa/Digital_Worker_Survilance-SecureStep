@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SecureStep – Digital Worker Surveillance</title>
+  <meta name="description" content="Real-time digital worker surveillance dashboard – GPS tracking, helmet monitoring, SOS alerts, zone management and productivity analytics." />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- MQTT over WebSocket -->
+  <script src="https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ───────────────────────────── SIDEBAR ───────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <path d="M14 2L4 7v7c0 6.08 4.24 11.76 10 13.14C19.76 25.76 24 20.08 24 14V7L14 2z" fill="url(#shieldGrad)" stroke="none"/>
+          <path d="M10 14l3 3 5-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <defs>
+            <linearGradient id="shieldGrad" x1="4" y1="2" x2="24" y2="27" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#00d2ff"/>
+              <stop offset="100%" stop-color="#0066cc"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">SecureStep</span>
+        <span class="brand-sub">Surveillance</span>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a class="nav-item active" id="nav-dashboard" onclick="switchSection('dashboard')">
+        <i data-lucide="layout-dashboard"></i><span>Dashboard</span>
+      </a>
+      <a class="nav-item" id="nav-map" onclick="switchSection('map')">
+        <i data-lucide="map"></i><span>Live Map</span>
+      </a>
+      <a class="nav-item" id="nav-alerts" onclick="switchSection('alerts')">
+        <i data-lucide="bell"></i>
+        <span>Alerts</span>
+        <span class="badge" id="alert-badge">0</span>
+      </a>
+      <a class="nav-item" id="nav-admin" onclick="switchSection('admin')">
+        <i data-lucide="settings-2"></i><span>Zone Admin</span>
+      </a>
+      <a class="nav-item" id="nav-analytics" onclick="switchSection('analytics')">
+        <i data-lucide="bar-chart-3"></i><span>Analytics</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="worker-card">
+        <div class="worker-avatar">W</div>
+        <div class="worker-info">
+          <span class="worker-name">SECURE_STEP-001</span>
+          <span class="worker-role">Field Worker</span>
+        </div>
+        <div class="worker-dot" id="worker-status-dot"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ───────────────────────────── MAIN ──────────────────────────────────── -->
+  <main class="main-content">
+
+    <!-- TOP BAR -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1 class="page-title" id="page-title">Dashboard</h1>
+        <span class="page-subtitle" id="page-subtitle">Real-time worker surveillance overview</span>
+      </div>
+      <div class="topbar-right">
+        <div class="live-clock" id="live-clock">18:42:12</div>
+        <div class="conn-badge" id="conn-badge">
+          <span class="conn-dot"></span>
+          <span id="conn-label">Connecting…</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ═══════════ DASHBOARD SECTION ═══════════ -->
+    <section class="section active" id="section-dashboard">
+
+      <!-- SOS BANNER (hidden by default) -->
+      <div class="sos-banner" id="sos-banner">
+        <div class="sos-pulse"></div>
+        <i data-lucide="alert-octagon"></i>
+        <strong>SOS ACTIVATED!</strong>
+        <span>Worker SECURE_STEP-001 has triggered an emergency SOS alert.</span>
+        <button onclick="dismissSOS()">Dismiss</button>
+      </div>
+
+      <!-- STATS ROW -->
+      <div class="stats-grid">
+
+        <!-- GPS Card -->
+        <div class="stat-card" id="card-gps">
+          <div class="stat-icon cyan"><i data-lucide="map-pin"></i></div>
+          <div class="stat-body">
+            <span class="stat-label">GPS Location</span>
+            <span class="stat-value mono" id="stat-coords">—</span>
+            <div class="stat-meta">
+              <span id="stat-speed">Speed: — km/h</span>
+              <span id="stat-alt">Alt: — m</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Helmet Card -->
+        <div class="stat-card" id="card-helmet">
+          <div class="stat-icon green" id="helmet-icon"><i data-lucide="hard-hat"></i></div>
+          <div class="stat-body">
+            <span class="stat-label">Helmet Status</span>
+            <span class="stat-value" id="stat-helmet">Unknown</span>
+            <div class="stat-meta">
+              <span id="stat-helmet-time">Last checked: —</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Zone Card -->
+        <div class="stat-card" id="card-zone">
+          <div class="stat-icon blue" id="zone-icon"><i data-lucide="shield-check"></i></div>
+          <div class="stat-body">
+            <span class="stat-label">Zone Status</span>
+            <span class="stat-value" id="stat-zone">Safe Zone</span>
+            <div class="stat-meta">
+              <span id="stat-zone-dist">Distance to restricted: — m</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Productivity Card -->
+        <div class="stat-card" id="card-productivity">
+          <div class="stat-icon purple"><i data-lucide="clock"></i></div>
+          <div class="stat-body">
+            <span class="stat-label">Time In Work Zone</span>
+            <span class="stat-value mono" id="stat-productivity">00:00:00</span>
+            <div class="stat-meta">
+              <span id="stat-prod-pct">Session productivity: 0%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SOS Card -->
+        <div class="stat-card" id="card-sos">
+          <div class="stat-icon red" id="sos-icon"><i data-lucide="siren"></i></div>
+          <div class="stat-body">
+            <span class="stat-label">SOS Status</span>
+            <span class="stat-value" id="stat-sos">Normal</span>
+            <div class="stat-meta">
+              <span id="stat-sos-time">Last triggered: Never</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Device Card -->
+        <div class="stat-card" id="card-device">
+          <div class="stat-icon orange"><i data-lucide="cpu"></i></div>
+          <div class="stat-body">
+            <span class="stat-label">Device Info</span>
+            <span class="stat-value mono" id="stat-device-id">SECURE_STEP-001</span>
+            <div class="stat-meta">
+              <span id="stat-last-seen">Last seen: —</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- MINI MAP + RECENT ALERTS ROW -->
+      <div class="dashboard-lower">
+        <div class="glass-card map-mini-wrapper">
+          <div class="card-header">
+            <i data-lucide="satellite"></i>
+            <span>Live Tracking Map</span>
+            <button class="btn-sm" onclick="switchSection('map')">Full Map →</button>
+          </div>
+          <div id="mini-map" class="mini-map"></div>
+        </div>
+
+        <div class="glass-card">
+          <div class="card-header">
+            <i data-lucide="activity"></i>
+            <span>Recent Alerts</span>
+            <span class="badge-sm" id="recent-alert-count">0</span>
+          </div>
+          <div class="alert-list" id="recent-alerts">
+            <div class="alert-empty">No alerts yet. All systems nominal.</div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ═══════════ LIVE MAP SECTION ═══════════ -->
+    <section class="section" id="section-map">
+      <div class="glass-card full-map-card">
+        <div class="card-header map-header">
+          <span>
+            <i data-lucide="map-pin"></i> Live Worker Map
+          </span>
+          <div class="map-legend">
+            <span class="legend-item"><span class="dot green-dot"></span>Work Zone (50m)</span>
+            <span class="legend-item"><span class="dot red-dot"></span>Restricted Zone (100m)</span>
+            <span class="legend-item"><span class="dot blue-dot"></span>Worker</span>
+          </div>
+        </div>
+        <div id="main-map" class="main-map"></div>
+      </div>
+    </section>
+
+    <!-- ═══════════ ALERTS SECTION ═══════════ -->
+    <section class="section" id="section-alerts">
+      <div class="glass-card">
+        <div class="card-header">
+          <i data-lucide="bell-ring"></i>
+          <span>Alert History Log</span>
+          <button class="btn-sm danger" onclick="clearAlerts()">Clear All</button>
+        </div>
+        <div class="alert-filters">
+          <button class="filter-btn active" onclick="filterAlerts('all', this)">All</button>
+          <button class="filter-btn" onclick="filterAlerts('sos', this)">SOS</button>
+          <button class="filter-btn" onclick="filterAlerts('restricted', this)">Restricted Zone</button>
+          <button class="filter-btn" onclick="filterAlerts('helmet', this)">Helmet</button>
+          <button class="filter-btn" onclick="filterAlerts('zone', this)">Zone Change</button>
+        </div>
+        <div class="alert-table-wrapper">
+          <table class="alert-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Severity</th>
+                <th>Message</th>
+                <th>Coordinates</th>
+              </tr>
+            </thead>
+            <tbody id="alert-tbody">
+              <tr class="alert-empty-row">
+                <td colspan="5">No alerts recorded yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ ADMIN SECTION ═══════════ -->
+    <section class="section" id="section-admin">
+      <div class="admin-grid">
+
+        <!-- Add Working Area -->
+        <div class="glass-card">
+          <div class="card-header">
+            <i data-lucide="map-pin-plus"></i>
+            <span>Add Working Area</span>
+            <span class="badge-sm green-badge">50m radius</span>
+          </div>
+          <form class="zone-form" onsubmit="addWorkingArea(event)">
+            <div class="form-group">
+              <label>Area Name</label>
+              <input type="text" id="wa-name" placeholder="e.g. Assembly Zone A" required />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Latitude</label>
+                <input type="number" id="wa-lat" step="any" placeholder="20.255930" required />
+              </div>
+              <div class="form-group">
+                <label>Longitude</label>
+                <input type="number" id="wa-lng" step="any" placeholder="85.866354" required />
+              </div>
+            </div>
+            <button type="submit" class="btn-primary green-btn">
+              <i data-lucide="plus-circle"></i> Add Working Area
+            </button>
+          </form>
+        </div>
+
+        <!-- Add Restricted Area -->
+        <div class="glass-card">
+          <div class="card-header">
+            <i data-lucide="octagon-x"></i>
+            <span>Add Restricted Area</span>
+            <span class="badge-sm red-badge">100m radius</span>
+          </div>
+          <form class="zone-form" onsubmit="addRestrictedArea(event)">
+            <div class="form-group">
+              <label>Area Name</label>
+              <input type="text" id="ra-name" placeholder="e.g. Boiler Room" required />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Latitude</label>
+                <input type="number" id="ra-lat" step="any" placeholder="20.253580" required />
+              </div>
+              <div class="form-group">
+                <label>Longitude</label>
+                <input type="number" id="ra-lng" step="any" placeholder="85.842148" required />
+              </div>
+            </div>
+            <button type="submit" class="btn-primary red-btn">
+              <i data-lucide="shield-x"></i> Add Restricted Area
+            </button>
+          </form>
+        </div>
+
+        <!-- Working Areas List -->
+        <div class="glass-card">
+          <div class="card-header">
+            <i data-lucide="list-checks"></i>
+            <span>Working Areas</span>
+            <span class="badge-sm green-badge" id="wa-count">0</span>
+          </div>
+          <div class="zone-list" id="wa-list">
+            <div class="zone-empty">No working areas added yet.</div>
+          </div>
+        </div>
+
+        <!-- Restricted Areas List -->
+        <div class="glass-card">
+          <div class="card-header">
+            <i data-lucide="shield-alert"></i>
+            <span>Restricted Areas</span>
+            <span class="badge-sm red-badge" id="ra-count">0</span>
+          </div>
+          <div class="zone-list" id="ra-list">
+            <div class="zone-empty">No restricted areas added yet.</div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═══════════ ANALYTICS SECTION ═══════════ -->
+    <section class="section" id="section-analytics">
+      <div class="analytics-grid">
+
+        <div class="glass-card">
+          <div class="card-header">
+            <i data-lucide="pie-chart"></i>
+            <span>Session Productivity Breakdown</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="chart-productivity"></canvas>
+          </div>
+          <div class="chart-legend">
+            <span><span class="dot green-dot"></span>In Work Zone</span>
+            <span><span class="dot yellow-dot"></span>Outside Zone</span>
+            <span><span class="dot red-dot"></span>Restricted Zone</span>
+          </div>
+        </div>
+
+        <div class="glass-card">
+          <div class="card-header">
+            <i data-lucide="trending-up"></i>
+            <span>Speed Over Time</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="chart-speed"></canvas>
+          </div>
+        </div>
+
+        <div class="glass-card analytics-summary">
+          <div class="card-header">
+            <i data-lucide="clipboard-list"></i>
+            <span>Session Summary</span>
+          </div>
+          <div class="summary-grid">
+            <div class="summary-item">
+              <span class="sum-label">Session Duration</span>
+              <span class="sum-value mono" id="sum-duration">00:00:00</span>
+            </div>
+            <div class="summary-item">
+              <span class="sum-label">In Work Zone</span>
+              <span class="sum-value mono green-text" id="sum-inzone">00:00:00</span>
+            </div>
+            <div class="summary-item">
+              <span class="sum-label">Productivity %</span>
+              <span class="sum-value mono green-text" id="sum-pct">0%</span>
+            </div>
+            <div class="summary-item">
+              <span class="sum-label">Total Alerts</span>
+              <span class="sum-value mono red-text" id="sum-alerts">0</span>
+            </div>
+            <div class="summary-item">
+              <span class="sum-label">SOS Events</span>
+              <span class="sum-value mono red-text" id="sum-sos">0</span>
+            </div>
+            <div class="summary-item">
+              <span class="sum-label">Helmet Violations</span>
+              <span class="sum-value mono yellow-text" id="sum-helmet">0</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- TOAST CONTAINER -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
